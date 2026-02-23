@@ -34,7 +34,7 @@ jobs:
         run: |
           $RawTag = "${{ github.ref_name }}"
           $CleanTag = $RawTag -replace '/', '-'
-          echo "CLEAN_TAG=$CleanTag" >> $env:GITHUB_OUTPUT
+          echo "PACKAGE_VERSION=$CleanTag" >> $env:GITHUB_ENV
           Write-Host "Version détectée : $CleanTag"
 
       - uses: ilammy/msvc-dev-cmd@v1
@@ -86,5 +86,5 @@ jobs:
 
       - name: Upload conan package
         run: |
-          conan export-pkg . --version ${{ steps.sanitize.outputs.CLEAN_TAG }} -s arch=${{ inputs.arch }} -s build_type=Release
-          conan upload ${{ inputs.package_name }}/${{ steps.sanitize.outputs.CLEAN_TAG }} -r gitea_registry --confirm
+          conan export-pkg . --version ${{ env.PACKAGE_VERSION }} -s arch=${{ inputs.arch }} -s build_type=Release
+          conan upload ${{ inputs.package_name }}/${{ env.PACKAGE_VERSION }} -r gitea_registry --confirm
