@@ -28,15 +28,6 @@ jobs:
     runs-on: windows
     steps:
       - uses: actions/checkout@v4
-      - name: Sanitize Ref Name
-        shell: powershell
-        id: sanitize
-        run: |
-          $RawTag = "${{ github.ref_name }}"
-          $CleanTag = $RawTag -replace '/', '-'
-          echo "PACKAGE_VERSION=$CleanTag" >> $env:GITHUB_ENV
-          Write-Host "Version détectée : $CleanTag"
-
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ inputs.arch }}
@@ -86,5 +77,5 @@ jobs:
 
       - name: Upload conan package
         run: |
-          conan export-pkg . --version ${{ env.PACKAGE_VERSION }} -s arch=${{ inputs.arch }} -s build_type=Release
-          conan upload ${{ inputs.package_name }}/${{ env.PACKAGE_VERSION }} -r gitea_registry --confirm
+          conan export-pkg . --version ${{ github.ref_name }} -s arch=${{ inputs.arch }} -s build_type=Release
+          conan upload ${{ inputs.package_name }}/${{ github.ref_name }} -r gitea_registry --confirm
