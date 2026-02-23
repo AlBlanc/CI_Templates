@@ -1,0 +1,102 @@
+name: Conan Publish
+
+on:
+  workflow_call:
+    inputs:
+      package_name:
+        description: 'Must be the same as specified in root conanfile.py'
+        required: true
+        type: string
+      arch:
+        default: 'x86'
+        type: string
+      conan_registry:
+        default: 'http://192.168.0.206:3000/api/packages/VisiMAX/conan'
+      conan_username:
+        default: 'Alban'
+        type: string
+    secrets:
+      CONAN_PASSWORD:
+        required: true
+      PFX_BASE64:
+        required: false
+      PFX_PASSWORD:
+        required: false
+
+jobs:
+  publish:
+    runs-on: windows
+    steps:
+      - name: Sanitize Ref Name
+        shell: powershell
+        id: sanitize
+        run: |
+          $RawTag = "${{ github.ref_name }}"
+          $CleanTag = $RawTag -replace '/', '-'
+          echo "CLEAN_TAG=$CleanTag" >> $env:GITHUB_OUTPUT
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ inputs.arch }}
+
+      - name: Configure Conan Remote
+        run: |
+          conan remote add gitea_registry ${{ inputs.conan_registry }} --force
+          conan remote login gitea_registry ${{ inputs.conan_username }} -p ${{ secrets.CONAN_PASSWORD }}
+
+      - uses: actions/checkout@v4
+
+      - name: Create Conan Package
+        run: >
+          conan create . 
+          --version ${{ steps.sanitize.outputs.CLEAN_TAG }} 
+          -s arch=${{ inputs.arch }} 
+          -s build_type=Release 
+          -c tools.cmake.cmaketoolchain:generator=Ninja 
+          --build=missing
+
+      - name: Prepare Certificate
+        if: ${{ inputs.files_to_sign != '' }}
+        shell: powershell
+        run: |
+          $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.PFX_BASE64 }}")
+          # Génération d'un nom aléatoire unique pour eviter les conflits avec les autres processus
+          $random_name = "cert_" + [guid]::NewGuid().ToString().Substring(0,8) + ".pfx"
+          $pfx_path = Join-Path $env:TEMP $random_name
+          [System.IO.File]::WriteAllBytes($pfx_path, $pfx_cert_byte)
+          echo "RANDOM_PFX_PATH=$pfx_path" >> $env:GITHUB_ENV
+
+      - name: Build Project
+        run: |
+          conan install . -s arch=${{ inputs.arch }} -s build_type=Release --build=missing
+          conan build .  -s arch=${{ inputs.arch }} -s build_type=Release
+
+      - name: Sign Files
+        if: ${{ inputs.files_to_sign != '' }}
+        shell: powershell
+        run: |
+          $pfx_path = $env:RANDOM_PFX_PATH
+          $files = "${{ inputs.files_to_sign }}".Split(",")
+          
+          foreach ($file in $files) {
+            $f = $file.Trim()
+            if (Test-Path $f) {
+              Write-Host "Signature de $f"
+              & "signtool.exe" sign /f $pfx_path /p "${{ secrets.PFX_PASSWORD }}" /fd sha256 /tr "http://timestamp.digicert.com" /td sha256 $f
+            }
+          }
+
+      - name: Cleanup Certificates
+        if: always() && inputs.files_to_sign != ''
+        shell: powershell
+        run: |
+          $pfx_path = "$env:TEMP\cert.pfx"
+          if (Test-Path $pfx_path) {
+            Remove-Item -Force $pfx_path
+            Write-Host "Certificat supprimé avec succès."
+          }
+
+      - name: Upload conan package
+        run: |
+          conan export-pkg . --version ${{ steps.sanitize.outputs.CLEAN_TAG }} -s arch=${{ inputs.arch }} -s build_type=Release
+          conan upload ${{ inputs.package_name }}/${{ steps.sanitize.outputs.CLEAN_TAG }} -r gitea_registry --confirm
